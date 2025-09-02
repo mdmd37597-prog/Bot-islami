@@ -5,82 +5,93 @@ const axios = require("axios");
 const app = express();
 app.use(bodyParser.json());
 
-const PAGE_ACCESS_TOKEN = "EAAOGSi6yzuIBPYJdZCThgMsduUHiSM3OkErtbrZC5bK5stPlNh2u9ZCYaauZC6xuLflYvnZCH4ow070U29nTICZAbvVn2zaVvuRly7NZCr6kkCHAY1w2ZBSHLYVCsxSCm0DEQGFJEoZCurHX8fgEYKVcTpHhvXpi0Cb3L3ORDPJDIihvzE9YY6TZB0yyNHbAYTjrZB6io6tfJey";
-const VERIFY_TOKEN = "ABCD123;
+// 🔑 توكنات مباشرة
+const PAGE_ACCESS_TOKEN = "EAAOGSi6yzuIBPYJdZCThgMsduUHiSM3OkErtbrZC5bK5stPlNh2u9ZCYaauZC6xuLflYvnZCH4ow070U29nTICZAbvVn2zaVvuRly7NZCr6kkCHAY1w2ZBSHLYVCsxSCm0DEQGFJEoZCurHX8fgEYKVcTpHhvXpi0Cb3L3ORDPJDIihvzE9YY6TZB0yyNHbAYTjrZB6io6tfJey"; 
+const VERIFY_TOKEN = "ABCD123";
 
-let userAnswers = {}; // تخزين الأجوبة الصحيحة
+let userAnswers = {};
 
-// Webhook verification
+// ✅ Webhook verification
 app.get("/webhook", (req, res) => {
-  let mode = req.query["hub.mode"];
-  let token = req.query["hub.verify_token"];
-  let challenge = req.query["hub.challenge"];
+  try {
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
 
-  if (mode && token) {
-    if (mode === "subscribe" && token === VERIFY_TOKEN) {
-      console.log("✅ Webhook verified");
-      res.status(200).send(challenge);
-    } else {
-      res.sendStatus(403);
+    if (mode && token) {
+      if (mode === "subscribe" && token === VERIFY_TOKEN) {
+        return res.status(200).send(challenge);
+      } else {
+        return res.sendStatus(403);
+      }
     }
+    res.send("OK");
+  } catch (err) {
+    console.error("Webhook verification error:", err.message);
+    res.sendStatus(500);
   }
 });
 
-// Webhook events
+// ✅ Handle messages
 app.post("/webhook", async (req, res) => {
-  let body = req.body;
+  try {
+    if (req.body.object === "page") {
+      for (const entry of req.body.entry) {
+        const event = entry.messaging[0];
+        const sender_psid = event.sender.id;
 
-  if (body.object === "page") {
-    body.entry.forEach(async function(entry) {
-      let event = entry.messaging[0];
-      let sender_psid = event.sender.id;
+        if (event.message && event.message.text) {
+          let userMessage = event.message.text.trim();
 
-      if (event.message && event.message.text) {
-        let userMessage = event.message.text.trim();
-
-        // المستخدم دخل رقم للإجابة
-        if (/^[1-4]$/.test(userMessage) && userAnswers[sender_psid]) {
-          if (parseInt(userMessage) === userAnswers[sender_psid]) {
-            await sendMessage(sender_psid, "✅ صحيح! أحسنت 🎉");
-          } else {
-            await sendMessage(sender_psid, "❌ خطأ! حاول مرة أخرى.");
-          }
-          delete userAnswers[sender_psid]; // نمسحو الجواب من بعد
-        } else {
-          // نجيب سؤال جديد من API
-          try {
-            const { data } = await axios.get("https://api.bk9.dev/Islam//quizQuestions");
-
-            if (data.status) {
-              let quiz = data;
-              let reply = `❓ ${quiz.question}\n\n1️⃣ ${quiz.answer_1}\n2️⃣ ${quiz.answer_2}\n3️⃣ ${quiz.answer_3}\n4️⃣ ${quiz.answer_4}\n\n📩 جاوب برقم (1-4)`;
-
-              await sendMessage(sender_psid, reply);
-              userAnswers[sender_psid] = quiz.right_answer;
+          if (/^[1-4]$/.test(userMessage) && userAnswers[sender_psid]) {
+            if (parseInt(userMessage) === userAnswers[sender_psid]) {
+              await sendMessage(sender_psid, "✅ صحيح! أحسنت 🎉");
+            } else {
+              await sendMessage(sender_psid, "❌ خطأ! حاول مرة أخرى.");
             }
-          } catch (err) {
-            console.error(err);
-            await sendMessage(sender_psid, "⚠️ وقع خطأ فجلب السؤال!");
+            delete userAnswers[sender_psid];
+          } else {
+            try {
+              const { data } = await axios.get("https://api.bk9.dev/Islam//quizQuestions");
+
+              if (data && data.status) {
+                let reply = `❓ ${data.question}\n\n1️⃣ ${data.answer_1}\n2️⃣ ${data.answer_2}\n3️⃣ ${data.answer_3}\n4️⃣ ${data.answer_4}\n\n📩 جاوب برقم (1-4)`;
+                await sendMessage(sender_psid, reply);
+                userAnswers[sender_psid] = data.right_answer;
+              } else {
+                await sendMessage(sender_psid, "⚠️ ما قدرناش نجيب السؤال.");
+              }
+            } catch (err) {
+              console.error("API error:", err.message);
+              await sendMessage(sender_psid, "⚠️ مشكل فجلب السؤال.");
+            }
           }
         }
       }
-    });
-
-    res.status(200).send("EVENT_RECEIVED");
-  } else {
-    res.sendStatus(404);
+      return res.status(200).send("EVENT_RECEIVED");
+    } else {
+      return res.sendStatus(404);
+    }
+  } catch (err) {
+    console.error("Webhook POST error:", err.message);
+    res.sendStatus(500);
   }
 });
 
+// ✅ Send message safely
 async function sendMessage(sender_psid, response) {
-  await axios.post(
-    `https://graph.facebook.com/v20.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
-    {
-      recipient: { id: sender_psid },
-      message: { text: response },
-    }
-  );
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v20.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`,
+      {
+        recipient: { id: sender_psid },
+        message: { text: response }
+      }
+    );
+  } catch (err) {
+    console.error("Send message error:", err.message);
+  }
 }
 
+// مهم لـ Vercel
 module.exports = app;
-            
